@@ -1,3 +1,15 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Feb  7 10:54:10 2026
+
+@author: Antonin
+
+Architecture :
+- Le "cerveau" (règles) est séparé de l'interface Pygame.
+- L'UI affiche l'état du jeu et traduit les clics en actions.
+- Cela rend le projet plus robuste et facile à faire évoluer (sons, animations, etc.).
+"""
+
 import pygame
 import sys
 import random
@@ -10,19 +22,23 @@ pygame.init()
 # ============================================================
 
 class Animaux:
+    """Carte Animal : nom + 3 caractéristiques."""
     def __init__(self, nom, poids, longueur, longevite):
         self.nom = nom
         self.poids = poids
         self.longueur = longueur
         self.longevite = longevite
+        self.path_image = "assets/images/animaux/" + self.nom + ".png"
 
 
 class Joueur:
+    """Joueur : nom + pile de cartes (la carte visible est la dernière)."""
     def __init__(self, nom, cartes):
         self.nom = nom
         self.cartes = cartes
 
     def carte_visible(self):
+        # Sécurité : évite tout crash si le joueur n'a plus de cartes
         if not self.cartes:
             return None
         return self.cartes[-1]
@@ -31,7 +47,7 @@ class Joueur:
         return self.cartes.pop()
 
     def ajouter_carte(self, carte):
-        # réinsertion aléatoire
+        # Réinsertion aléatoire 
         self.cartes.insert(random.randint(0, len(self.cartes)), carte)
 
     def est_vaincu(self):
@@ -39,6 +55,7 @@ class Joueur:
 
 
 def distribuer_cartes(liste):
+    """Mélange puis distribue la moitié des cartes à chaque joueur."""
     cartes = liste.copy()
     random.shuffle(cartes)
     milieu = len(cartes) // 2
@@ -46,10 +63,15 @@ def distribuer_cartes(liste):
 
 
 def choix_robot_aleatoire():
+    """Robot A : choix d'une caractéristique au hasard."""
     return random.choice(["poids", "longueur", "longevite"])
 
 
 def choix_robot_intelligent(carte, historique):
+    """
+    Robot I : compare sa carte à une valeur de référence (médiane) issue
+    des cartes déjà jouées, et choisit la caractéristique la plus "forte" relativement.
+    """
     if not historique:
         return choix_robot_aleatoire()
 
@@ -67,8 +89,18 @@ def choix_robot_intelligent(carte, historique):
 
 class GameState:
     """
-    Moteur du jeu (aucun affichage ici)
-    Règle conservée: égalité => joueur actif perd (strict >)
+    Moteur du jeu (aucun affichage ici).
+
+    Règles :
+    - Deux joueurs possèdent chacun un ensemble de cartes (Animal).
+    - À chaque manche, le joueur actif choisit une caractéristique.
+    - La valeur strictement la plus élevée gagne la manche.
+    - En cas d'égalité, le joueur actif perd (règle strict >).
+    - Le gagnant récupère la carte adverse et les cartes sont réinsérées aléatoirement.
+    - La partie se termine lorsqu'un joueur n'a plus de cartes.
+
+    Invariant :
+    - Aucune carte ne doit être perdue ou dupliquée (vérification interne).
     """
     def __init__(self, joueur1, joueur2, mode_robot=None):
         self.joueurs = [joueur1, joueur2]
@@ -107,6 +139,7 @@ class GameState:
         v1 = getattr(carte_active, caracteristique)
         v2 = getattr(carte_adverse, caracteristique)
 
+        # règle : strictement supérieur pour gagner, sinon actif perd
         if v1 > v2:
             gagnant, perdant = self.joueur_actif, self.joueur_passif
         else:
@@ -132,7 +165,7 @@ class GameState:
             self.gagnant = gagnant
             return
 
-        # alternance
+        # on change le tour du joueur
         self.joueur_actif, self.joueur_passif = self.joueur_passif, self.joueur_actif
 
     def _verifier_invariants(self):
@@ -148,23 +181,24 @@ class GameState:
 
 
 LISTE_ANIMAUX = [
-    Animaux("Lion", 190, 250, 14),
-    Animaux("Éléphant", 6000, 600, 70),
-    Animaux("Tigre", 220, 290, 16),
-    Animaux("Girafe", 1200, 500, 25),
-    Animaux("Rhinocéros", 2500, 400, 50),
-    Animaux("Crocodile", 500, 520, 70),
-    Animaux("Ours", 600, 280, 30),
-    Animaux("Loup", 50, 160, 13),
-    Animaux("Zèbre", 350, 250, 25),
-    Animaux("Hippopotame", 1500, 350, 40),
-    Animaux("Kangourou", 85, 230, 23),
-    Animaux("Panthère", 90, 180, 15),
-    Animaux("Chien", 40, 110, 13),
-    Animaux("Chat", 5, 50, 15),
-    Animaux("Aigle", 6, 220, 25),
-    Animaux("Tortue", 300, 150, 100),
+    Animaux("aigle_royal", 4.8, 84, 25),
+    Animaux("cobra_royal", 10, 400, 22),
+    Animaux("corail_rouge", 2, 40, 60),
+    Animaux("dragon_de_komodo", 165, 310, 53),
+    Animaux("elephant_d_afrique", 5000, 600, 65),
+    Animaux("lion_d_afrique", 189, 210, 18),
+    Animaux("loup_rouge", 25, 110, 13),
+    Animaux("merou_golfe", 90, 198, 48),
+    Animaux("panda_geant", 97, 170, 22),
+    Animaux("panda_roux", 5, 57, 10),
+    Animaux("protee_anguillard", 0.02, 25, 69),
+    Animaux("raie_manta", 1500, 550, 19),
+    Animaux("requin_marteau_halicorne", 152, 330, 35),
+    Animaux("tapir", 200, 212, 30),
+    Animaux("tigre_de_siberie", 300, 230, 17),
+    Animaux("tortue_verte", 175, 100, 70),
 ]
+
 
 
 def creer_partie(mode, prenom="Humain"):
@@ -194,12 +228,12 @@ def creer_partie(mode, prenom="Humain"):
 # ======================= PYGAME / UI =========================
 # ============================================================
 
-# Fenêtre agrandie
+# Fenêtre 
 LARGEUR, HAUTEUR = 900, 600
 fenetre = pygame.display.set_mode((LARGEUR, HAUTEUR))
 pygame.display.set_caption("Défi Nature")
 
-# Couleurs (ton thème)
+# Couleurs 
 FOND = (30, 34, 40)
 PANEL = (42, 47, 54)
 VERT_NATURE = (58, 125, 90)
@@ -219,7 +253,7 @@ police_petite = pygame.font.SysFont("arial", 16)
 HAUT_H = 90
 GAUCHE_W = 180
 
-# Surfaces (comme ta maquette)
+# Surfaces 
 frame_haut = pygame.Surface((LARGEUR, HAUT_H))
 frame_gauche = pygame.Surface((GAUCHE_W, HAUTEUR - HAUT_H))
 frame_jeu = pygame.Surface((LARGEUR - GAUCHE_W, HAUTEUR - HAUT_H))
@@ -228,9 +262,45 @@ frame_jeu = pygame.Surface((LARGEUR - GAUCHE_W, HAUTEUR - HAUT_H))
 frame_j1 = pygame.Surface(((frame_jeu.get_width() - 20) // 2, frame_jeu.get_height() - 150))
 frame_j2 = pygame.Surface(((frame_jeu.get_width() - 20) // 2, frame_jeu.get_height() - 150))
 
-# Menu hamburger (conservé)
+# ============================================================
+# =========================== SONS ============================
+# ============================================================
+
+# Sons attendus dans le même dossier que main.py :
+# - click.wav
+# - win_round.wav
+# - lose_round.wav
+# - victory.wav
+
+# initialisation du module de pygame permettant de gerer les sons
+pygame.mixer.init() 
+
+def charger_son(path):
+    try:
+        return pygame.mixer.Sound(path)
+    except Exception:
+        return None
+
+S_CLICK = charger_son("assets/sounds/click.wav")
+S_VICTORY = charger_son("assets/sounds/victory.wav")
+
+def play(sound, volume=0.8):
+    if sound is None:
+        return
+    try:
+        sound.set_volume(volume)
+        sound.play()
+    except Exception:
+        pass
+
+victory_sound_played = False
+
+# ============================================================
+# ===================== MENU HAMBURGER ========================
+# ============================================================
+
 menu_ouvert = False
-options = ["Rejouer", "Règles", "Quitter"]
+options = ["Rejouer", "Règles", "À propos", "Quitter"]
 bouton_menu = pygame.Rect(20, 22, 46, 46)
 option_rects = [pygame.Rect(20, 30 + i * 60, 140, 46) for i in range(len(options))]
 
@@ -276,6 +346,27 @@ regles_texte = [
     "Fin : lorsqu'un joueur n'a plus de cartes."
 ]
 afficher_regles = False
+
+# À propos (overlay)
+apropos_texte = [
+    "À propos du projet",
+    "",
+    "Défi Nature – Projet NSI",
+    "Langage : Python",
+    "Interface : Pygame",
+    "",
+    "Organisation :",
+    "- Un moteur de jeu (règles, joueurs, robots) indépendant",
+    "- Une interface (affichage, clics, animations)",
+    "",
+    "Robots :",
+    "Robot aléatoire : choisit une caractéristique au hasard.",
+    "Robot intelligent : observe les cartes jouées, calcule une médiane",
+    "et choisit la caractéristique la plus avantageuse.",
+    "",
+    "Évolutions possibles : sons, musiques, nouvelles cartes, etc."
+]
+afficher_apropos = False
 
 # ============================================================
 # ========================= UTILITAIRES =======================
@@ -330,6 +421,57 @@ def dessiner_bouton(surface, rect, texte, actif=True):
     t = police.render(texte, True, NOIR)
     surface.blit(t, (rect.x + 18, rect.y + 16))
 
+
+def draw_overlay_box(title, lines):
+    overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    fenetre.blit(overlay, (0, 0))
+
+    box = pygame.Rect(120, 90, LARGEUR - 240, HAUTEUR - 180)
+    pygame.draw.rect(fenetre, PANEL, box, border_radius=14)
+    pygame.draw.rect(fenetre, VERT_NATURE, box, 3, border_radius=14)
+
+    titre = police_menu.render(title, True, BLANC)
+    fenetre.blit(titre, (box.x + 30, box.y + 20))
+
+    max_w = box.width - 60
+    y_text = box.y + 75
+    line_h = 20
+    font_rules = police
+
+    lignes = []
+    for l in lines:
+        if not l.strip():
+            lignes.append("")
+        elif l.startswith("- "):
+            for ll in wrap_lines(l, font_rules, max_w):
+                lignes.append("  " + ll)
+        else:
+            lignes.extend(wrap_lines(l, font_rules, max_w))
+
+    max_lines = (box.height - 120) // line_h
+    if len(lignes) > max_lines:
+        font_rules = pygame.font.SysFont("arial", 18)
+        line_h = 18
+        lignes = []
+        for l in lines:
+            if not l.strip():
+                lignes.append("")
+            elif l.startswith("- "):
+                for ll in wrap_lines(l, font_rules, max_w):
+                    lignes.append("  " + ll)
+            else:
+                lignes.extend(wrap_lines(l, font_rules, max_w))
+
+    max_lines = (box.height - 120) // line_h
+    for l in lignes[:max_lines]:
+        fenetre.blit(font_rules.render(l, True, BLANC), (box.x + 30, y_text))
+        y_text += line_h
+
+    fermer = police_petite.render("Cliquez dans la fenêtre pour fermer", True, BOUTON_ACTIF)
+    fenetre.blit(fermer, (box.x + 30, box.bottom - 35))
+
+    return box
 
 # ============================================================
 # ========================= ETATS UI ==========================
@@ -405,6 +547,10 @@ def start_round_animation():
         return
     anim_winner_index = 0 if game.dernier_gagnant is game.joueurs[0] else 1
 
+def ui_state_to_end():
+    global ui_state
+    ui_state = UI_END
+
 # Robot auto
 def robot_joue_si_besoin():
     global message_ui
@@ -418,6 +564,9 @@ def robot_joue_si_besoin():
         return
 
     if ui_state == UI_PLAY and game.actif_est_robot():
+        # clic "virtuel" -> petit feedback
+        play(S_CLICK, 0.6)
+
         carte = game.joueur_actif.carte_visible()
         if carte is None:
             ui_state_to_end()
@@ -432,11 +581,9 @@ def robot_joue_si_besoin():
 
         label = {"poids": "Poids", "longueur": "Longueur", "longevite": "Longévité"}[car]
         message_ui = f"{label} : {game.derniere_val_actif} vs {game.derniere_val_passif} — {game.dernier_gagnant.nom} gagne"
-        start_round_animation()
 
-def ui_state_to_end():
-    global ui_state
-    ui_state = UI_END
+
+        start_round_animation()
 
 # Répétition clavier (prénom)
 pygame.key.set_repeat(350, 35)
@@ -465,7 +612,7 @@ while running:
             running = False
 
         # clavier : saisie prénom
-        if ui_state == UI_START and event.type == pygame.KEYDOWN and prenom_actif and not afficher_regles:
+        if ui_state == UI_START and event.type == pygame.KEYDOWN and prenom_actif and not afficher_regles and not afficher_apropos:
             if event.key == pygame.K_BACKSPACE:
                 prenom = prenom[:-1]
             elif event.key == pygame.K_RETURN:
@@ -478,15 +625,22 @@ while running:
         if event.type == pygame.MOUSEBUTTONDOWN:
             x, y = event.pos
 
-            # Overlay règles : clic pour fermer
+            # Overlay règles / à propos : clic pour fermer
             if afficher_regles:
                 if 120 <= x <= LARGEUR - 120 and 90 <= y <= HAUTEUR - 90:
                     afficher_regles = False
+                    play(S_CLICK, 0.6)
+                continue
+            if afficher_apropos:
+                if 120 <= x <= LARGEUR - 120 and 90 <= y <= HAUTEUR - 90:
+                    afficher_apropos = False
+                    play(S_CLICK, 0.6)
                 continue
 
             # hamburger
             if bouton_menu.collidepoint(x, y):
                 menu_ouvert = not menu_ouvert
+                play(S_CLICK, 0.6)
 
             # menu options (gauche)
             if menu_ouvert:
@@ -495,16 +649,21 @@ while running:
                     for i, rect in enumerate(option_rects):
                         if rect.collidepoint(lx, ly):
                             opt = options[i]
+                            play(S_CLICK, 0.6)
+
                             if opt == "Quitter":
                                 running = False
                             elif opt == "Règles":
                                 afficher_regles = True
+                            elif opt == "À propos":
+                                afficher_apropos = True
                             elif opt == "Rejouer":
                                 ui_state = UI_START
                                 game = None
                                 message_ui = ""
                                 menu_ouvert = False
                                 prenom_actif = True
+                                victory_sound_played = False
                             menu_ouvert = False
 
             # START : clic champ / clear / mode
@@ -513,22 +672,27 @@ while running:
 
                 if input_rect.collidepoint(x, y):
                     prenom_actif = True
+                    play(S_CLICK, 0.6)
                 elif clear_rect.collidepoint(x, y):
                     prenom = ""
                     prenom_actif = True
+                    play(S_CLICK, 0.6)
 
                 for label, mode, rect in start_buttons:
                     if rect.collidepoint(x, y):
+                        play(S_CLICK, 0.7)
                         game = creer_partie(mode, prenom=prenom)
                         ui_state = UI_PLAY
                         message_ui = ""
                         menu_ouvert = False
+                        victory_sound_played = False
                         break
 
             # RESULT : clic pour continuer
             elif ui_state == UI_RESULT:
                 ui_state = UI_PLAY
                 message_ui = ""
+                play(S_CLICK, 0.6)
 
             # ANIM : on ignore les clics (anti-spam)
             elif ui_state == UI_ANIM:
@@ -538,12 +702,15 @@ while running:
             elif ui_state == UI_END:
                 panel = layout_victory_panel()
                 if victory_replay_rect.collidepoint(x, y):
+                    play(S_CLICK, 0.7)
                     ui_state = UI_START
                     game = None
                     message_ui = ""
                     menu_ouvert = False
                     prenom_actif = True
+                    victory_sound_played = False
                 elif victory_quit_rect.collidepoint(x, y):
+                    play(S_CLICK, 0.6)
                     running = False
 
             # PLAY : clic carac si humain actif
@@ -552,8 +719,15 @@ while running:
                 local_y = y - HAUT_H
                 for label, key, rect in boutons_carac:
                     if rect.collidepoint(local_x, local_y):
+                        play(S_CLICK, 0.7)
+
+                        actif_avant = game.joueur_actif
                         game.appliquer_manche(key)
+
                         message_ui = f"{label} : {game.derniere_val_actif} vs {game.derniere_val_passif} — {game.dernier_gagnant.nom} gagne"
+
+
+
                         start_round_animation()
                         break
 
@@ -618,7 +792,7 @@ while running:
         for label, mode, rect in start_buttons:
             dessiner_bouton(fenetre, rect, label, actif=True)
 
-        hint = police_petite.render("Menu ≡ : Rejouer / Règles / Quitter", True, BLANC)
+        hint = police_petite.render("Menu ≡ : Rejouer / Règles / À propos / Quitter", True, BLANC)
         fenetre.blit(hint, (box.x + 70, box.bottom - 30))
 
     else:
@@ -627,7 +801,7 @@ while running:
             est_actif_j1 = (game.joueur_actif is game.joueurs[0])
             est_actif_j2 = (game.joueur_actif is game.joueurs[1])
 
-            # highlight animation: on met une bordure forte sur le gagnant de la manche
+            # highlight animation: bordure forte sur le gagnant de la manche
             highlight_j1 = (ui_state == UI_ANIM and anim_winner_index == 0)
             highlight_j2 = (ui_state == UI_ANIM and anim_winner_index == 1)
 
@@ -669,56 +843,19 @@ while running:
 
     # ===================== OVERLAY RÈGLES =====================
     if afficher_regles:
-        overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        fenetre.blit(overlay, (0, 0))
+        draw_overlay_box("Règles du jeu", regles_texte)
 
-        regles_frame = pygame.Rect(120, 90, LARGEUR - 240, HAUTEUR - 180)
-        pygame.draw.rect(fenetre, PANEL, regles_frame, border_radius=14)
-        pygame.draw.rect(fenetre, VERT_NATURE, regles_frame, 3, border_radius=14)
-
-        titre = police_menu.render("Règles du jeu", True, BLANC)
-        fenetre.blit(titre, (regles_frame.x + 30, regles_frame.y + 20))
-
-        max_w = regles_frame.width - 60
-        y_text = regles_frame.y + 75
-        line_h = 20
-        font_rules = police
-
-        lignes = []
-        for l in regles_texte:
-            if not l.strip():
-                lignes.append("")
-            elif l.startswith("- "):
-                for ll in wrap_lines(l, font_rules, max_w):
-                    lignes.append("  " + ll)
-            else:
-                lignes.extend(wrap_lines(l, font_rules, max_w))
-
-        max_lines = (regles_frame.height - 120) // line_h
-        if len(lignes) > max_lines:
-            font_rules = pygame.font.SysFont("arial", 18)
-            line_h = 18
-            lignes = []
-            for l in regles_texte:
-                if not l.strip():
-                    lignes.append("")
-                elif l.startswith("- "):
-                    for ll in wrap_lines(l, font_rules, max_w):
-                        lignes.append("  " + ll)
-                else:
-                    lignes.extend(wrap_lines(l, font_rules, max_w))
-
-        max_lines = (regles_frame.height - 120) // line_h
-        for l in lignes[:max_lines]:
-            fenetre.blit(font_rules.render(l, True, BLANC), (regles_frame.x + 30, y_text))
-            y_text += line_h
-
-        fermer = police_petite.render("Cliquez dans la fenêtre pour fermer", True, BOUTON_ACTIF)
-        fenetre.blit(fermer, (regles_frame.x + 30, regles_frame.bottom - 35))
+    # ===================== OVERLAY À PROPOS ===================
+    if afficher_apropos:
+        draw_overlay_box("À propos / Robots", apropos_texte)
 
     # ===================== ECRAN VICTOIRE DEDIE =====================
     if ui_state == UI_END:
+        # jouer le son de victoire une seule fois
+        if game is not None and game.terminee and (not victory_sound_played):
+            play(S_VICTORY, 0.9)
+            victory_sound_played = True
+
         # overlay sombre
         overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
@@ -750,6 +887,7 @@ while running:
         dessiner_bouton(fenetre, victory_replay_rect, "Rejouer", actif=True)
         dessiner_bouton(fenetre, victory_quit_rect, "Quitter", actif=False)
 
+        hint = police_petite.render("Astuce : Menu ≡ fonctionne aussi", True, BLANC)
         fenetre.blit(hint, (panel.x + 30, panel.bottom - 30))
 
     pygame.display.flip()
