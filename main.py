@@ -15,6 +15,10 @@ import sys
 import random
 import numpy as np
 
+# AJOUT (cerveau / données) : CSV animaux
+import csv
+from pathlib import Path
+
 pygame.init()
 
 # ============================================================
@@ -122,6 +126,10 @@ class GameState:
         self.derniere_val_passif = None
         self.dernier_gagnant = None
 
+        # AJOUT : historique des manches (moteur)
+        # Chaque entrée: dict(actif, passif, carac, v_actif, v_passif, gagnant)
+        self.historique_manches = []
+
     def actif_est_robot(self):
         return self.mode_robot is not None and self.joueur_actif.nom == "Robot"
 
@@ -160,6 +168,19 @@ class GameState:
         self.derniere_val_passif = v2
         self.dernier_gagnant = gagnant
 
+        # AJOUT : log de manche (avant le swap de tour)
+        try:
+            self.historique_manches.append({
+                "actif": self.joueur_actif.nom,
+                "passif": self.joueur_passif.nom,
+                "carac": caracteristique,
+                "v_actif": v1,
+                "v_passif": v2,
+                "gagnant": gagnant.nom
+            })
+        except Exception:
+            pass
+
         if perdant.est_vaincu():
             self.terminee = True
             self.gagnant = gagnant
@@ -178,6 +199,76 @@ class GameState:
         assert set(id(c) for c in toutes) == set(id(c) for c in self.cartes_initiales), (
             "ERREUR: carte disparue ou carte inconnue apparue"
         )
+
+
+# -------------------------------------------------------------------
+# AJOUT (cerveau / données) : chargement CSV robuste + fallback
+# -------------------------------------------------------------------
+
+def _trouver_racine_projet():
+    """
+    Retourne un Path de base pour retrouver /data même si on exécute depuis ailleurs.
+    - si __file__ existe : dossier du script
+    - sinon : dossier courant
+    """
+    try:
+        return Path(__file__).resolve().parent
+    except Exception:
+        return Path.cwd()
+
+
+def charger_animaux_csv(path_csv):
+    """
+    Charge des animaux depuis un CSV.
+    - Supporte délimiteur ';' ou ',' (auto: essaie ';' puis ',').
+    - Supporte en-tête: nom, poids, longueur, longevite.
+    - Ignore les lignes invalides (robustesse).
+    Retourne une liste (peut être vide si échec).
+    """
+    p = Path(path_csv)
+    if not p.exists():
+        return []
+
+    try:
+        contenu = p.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+
+    if not contenu:
+        return []
+
+    def _parse_with_delim(delim):
+        animaux = []
+        try:
+            reader = csv.DictReader(contenu, delimiter=delim)
+        except Exception:
+            return []
+
+        champs = set([c.strip().lower() for c in (reader.fieldnames or [])])
+        attendus = {"nom", "poids", "longueur", "longevite"}
+        if not attendus.issubset(champs):
+            return []
+
+        for row in reader:
+            try:
+                nom = (row.get("nom") or "").strip()
+                if not nom:
+                    continue
+                poids = float(str(row.get("poids")).replace(",", "."))
+                longueur = float(str(row.get("longueur")).replace(",", "."))
+                longevite = float(str(row.get("longevite")).replace(",", "."))
+                animaux.append(Animaux(nom, poids, longueur, longevite))
+            except Exception:
+                continue
+
+        return animaux
+
+    animaux = _parse_with_delim(";")
+    if animaux:
+        return animaux
+
+    animaux = _parse_with_delim(",")
+    return animaux
 
 
 LISTE_ANIMAUX = [
@@ -199,6 +290,11 @@ LISTE_ANIMAUX = [
     Animaux("tortue_verte", 175, 100, 70),
 ]
 
+_RACINE = _trouver_racine_projet()
+_CSV_PATH = _RACINE / "data" / "animaux.csv"
+_animaux_csv = charger_animaux_csv(_CSV_PATH)
+if _animaux_csv:
+    LISTE_ANIMAUX = _animaux_csv
 
 
 def creer_partie(mode, prenom="Humain"):
@@ -263,16 +359,25 @@ frame_j1 = pygame.Surface(((frame_jeu.get_width() - 20) // 2, frame_jeu.get_heig
 frame_j2 = pygame.Surface(((frame_jeu.get_width() - 20) // 2, frame_jeu.get_height() - 150))
 
 # ============================================================
+# ========================== OPTIONS UI =======================
+# ============================================================
+
+# AJOUT : paramètres UI simples (menu Options)
+SETTINGS = {
+    "show_opponent_card": True,  # debug : montre l'adversaire (carte visible)
+    "volume": 0.8               # volume global [0.0, 1.0]
+}
+
+def clamp01(x):
+    try:
+        return max(0.0, min(1.0, float(x)))
+    except Exception:
+        return 0.8
+
+# ============================================================
 # =========================== SONS ============================
 # ============================================================
 
-# Sons attendus dans le même dossier que main.py :
-# - click.wav
-# - win_round.wav
-# - lose_round.wav
-# - victory.wav
-
-# initialisation du module de pygame permettant de gerer les sons
 pygame.mixer.init()
 
 def charger_son(path):
@@ -285,10 +390,15 @@ S_CLICK = charger_son("assets/sounds/click.wav")
 S_VICTORY = charger_son("assets/sounds/victory.wav")
 
 def play(sound, volume=0.8):
+    """
+    volume attendu par pygame: float entre 0.0 et 1.0 :contentReference[oaicite:2]{index=2}
+    Ici on applique un volume global SETTINGS["volume"].
+    """
     if sound is None:
         return
     try:
-        sound.set_volume(volume)
+        v = clamp01(volume) * clamp01(SETTINGS.get("volume", 0.8))
+        sound.set_volume(v)
         sound.play()
     except Exception:
         pass
@@ -300,9 +410,16 @@ victory_sound_played = False
 # ============================================================
 
 menu_ouvert = False
-options = ["Rejouer", "Règles", "À propos", "Quitter"]
+
+# AJOUT : "Options"
+options = ["Rejouer", "Options", "Règles", "À propos", "Quitter"]
 bouton_menu = pygame.Rect(20, 22, 46, 46)
 option_rects = [pygame.Rect(20, 30 + i * 60, 140, 46) for i in range(len(options))]
+
+# Overlays
+afficher_regles = False
+afficher_apropos = False
+afficher_options = False
 
 # Zone carte (dans frame_j1/j2)
 zone_carte = pygame.Rect(20, 20, frame_j1.get_width() - 40, frame_j1.get_height() - 40)
@@ -343,9 +460,10 @@ regles_texte = [
     "Le gagnant récupère la carte adverse.",
     "Les cartes sont réinsérées aléatoirement.",
     "",
-    "Fin : lorsqu'un joueur n'a plus de cartes."
+    "Fin : lorsqu'un joueur n'a plus de cartes.",
+    "",
+    "Raccourcis : 1=Poids  2=Longueur  3=Longévité"
 ]
-afficher_regles = False
 
 # À propos (overlay)
 apropos_texte = [
@@ -366,7 +484,6 @@ apropos_texte = [
     "",
     "Retrouvez notre projet sur github : https://github.com/AntoCheMaestro :)"
 ]
-afficher_apropos = False
 
 # ============================================================
 # ========================= UTILITAIRES =======================
@@ -410,7 +527,6 @@ def charger_image_carte(path, target_w, target_h):
             IMAGES_CACHE[key] = None
             return None
 
-        # fit dans la zone sans déformation
         scale = min(target_w / iw, target_h / ih)
         new_w = max(1, int(iw * scale))
         new_h = max(1, int(ih * scale))
@@ -422,82 +538,11 @@ def charger_image_carte(path, target_w, target_h):
         IMAGES_CACHE[key] = None
         return None
 
-
-def draw_card(surface, joueur, est_actif, highlight=False):
-    # base
-    pygame.draw.rect(surface, CARTE_COL, zone_carte, border_radius=12)
-
-    # bordure actif / highlight animation
-    if highlight:
-        pygame.draw.rect(surface, BOUTON_ACTIF, zone_carte, width=8, border_radius=12)
-    elif est_actif:
-        pygame.draw.rect(surface, BOUTON_ACTIF, zone_carte, width=4, border_radius=12)
-
-    carte = joueur.carte_visible()
-    if carte is None:
-        # Nom joueur (overlay léger)
-        name = police.render(joueur.nom, True, NOIR)
-        surface.blit(name, (30, 28))
-
-        surface.blit(police.render("Plus de cartes", True, NOIR), (30, 120))
-
-        # Indication du nombre de cartes : déplacée en bas (hors carte)
-        txt_count = police_petite.render(f"Cartes : {len(joueur.cartes)}", True, BLANC)
-        surface.blit(txt_count, (20, surface.get_height() - 28))
-        return
-
-    # ----------------------------------------------------------------
-    # Affichage "carte complète" (image) centrée dans zone_carte
-    # ----------------------------------------------------------------
-    img = charger_image_carte(carte.path_image, zone_carte.width, zone_carte.height)
-
-    if img is not None:
-        r = img.get_rect()
-        r.center = zone_carte.center
-        surface.blit(img, r.topleft)
-    else:
-        # fallback robuste si image manquante
-        pygame.draw.rect(surface, CARTE_COL, zone_carte, border_radius=12)
-        pygame.draw.rect(surface, NOIR, zone_carte, width=2, border_radius=12)
-        surface.blit(police.render(joueur.nom, True, NOIR), (30, 28))
-        surface.blit(police.render(carte.nom, True, NOIR), (30, 62))
-        surface.blit(police.render("Image introuvable", True, NOIR), (30, 120))
-
-    # ----------------------------------------------------------------
-    # Bandeau info joueur (léger) + message debug carte adverse
-    # ----------------------------------------------------------------
-    # Petit bandeau semi-transparent en haut à gauche (évite de trop masquer la carte)
-    bandeau = pygame.Surface((zone_carte.width, 30), pygame.SRCALPHA)
-    bandeau.fill((0, 0, 0, 90))
-    surface.blit(bandeau, (zone_carte.x, zone_carte.y))
-
-    surface.blit(police_petite.render(joueur.nom, True, BLANC), (zone_carte.x + 10, zone_carte.y + 7))
-
-    # Message debug uniquement sur la carte adverse (donc change à chaque manche)
-    try:
-        if game is not None and joueur is not game.joueur_actif:
-            dbg = police_petite.render("(Mode debug : en vrai on ne voit pas la carte)", True, BOUTON_ACTIF)
-            # petit fond pour lisibilité
-            dbg_bg = pygame.Surface((dbg.get_width() + 12, dbg.get_height() + 6), pygame.SRCALPHA)
-            dbg_bg.fill((0, 0, 0, 140))
-            surface.blit(dbg_bg, (zone_carte.x + 10, zone_carte.y + 36))
-            surface.blit(dbg, (zone_carte.x + 16, zone_carte.y + 39))
-    except Exception:
-        pass
-
-    # ----------------------------------------------------------------
-    # Indication du nombre de cartes : déplacée en bas (hors carte)
-    # ----------------------------------------------------------------
-    txt_count = police_petite.render(f"Cartes : {len(joueur.cartes)}", True, BLANC)
-    surface.blit(txt_count, (20, surface.get_height() - 28))
-
-
 def dessiner_bouton(surface, rect, texte, actif=True):
     couleur = BOUTON_ACTIF if actif else BOUTON
     pygame.draw.rect(surface, couleur, rect, border_radius=12)
     t = police.render(texte, True, NOIR)
     surface.blit(t, (rect.x + 18, rect.y + 16))
-
 
 def draw_overlay_box(title, lines):
     overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
@@ -549,6 +594,120 @@ def draw_overlay_box(title, lines):
     fenetre.blit(fermer, (box.x + 30, box.bottom - 35))
 
     return box
+
+# -----------------------------
+# AJOUT : overlay Options
+# -----------------------------
+
+def layout_options_panel():
+    panel = pygame.Rect(180, 140, LARGEUR - 360, HAUTEUR - 280)
+
+    toggle_rect = pygame.Rect(panel.x + 30, panel.y + 90, panel.width - 60, 52)
+
+    minus_rect = pygame.Rect(panel.x + 30, panel.y + 175, 52, 52)
+    plus_rect  = pygame.Rect(panel.right - 82, panel.y + 175, 52, 52)
+    bar_rect   = pygame.Rect(minus_rect.right + 16, panel.y + 187, panel.width - 60 - 52 - 52 - 32, 28)
+
+    return panel, toggle_rect, minus_rect, plus_rect, bar_rect
+
+def draw_options_overlay():
+    overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    fenetre.blit(overlay, (0, 0))
+
+    panel, toggle_rect, minus_rect, plus_rect, bar_rect = layout_options_panel()
+
+    pygame.draw.rect(fenetre, PANEL, panel, border_radius=16)
+    pygame.draw.rect(fenetre, VERT_NATURE, panel, 3, border_radius=16)
+
+    titre = police_menu.render("Options", True, BLANC)
+    fenetre.blit(titre, (panel.x + 30, panel.y + 25))
+
+    # Toggle carte adverse (debug)
+    pygame.draw.rect(fenetre, FOND, toggle_rect, border_radius=12)
+    label = "Afficher la carte adverse (debug)"
+    val = "ON" if SETTINGS.get("show_opponent_card", True) else "OFF"
+    t1 = police.render(label, True, BLANC)
+    t2 = police.render(val, True, BOUTON_ACTIF)
+    fenetre.blit(t1, (toggle_rect.x + 14, toggle_rect.y + 14))
+    fenetre.blit(t2, (toggle_rect.right - t2.get_width() - 14, toggle_rect.y + 14))
+
+    # Volume
+    vol = clamp01(SETTINGS.get("volume", 0.8))
+    vol_pct = int(round(vol * 100))
+
+    tvol = police.render("Volume sons", True, BLANC)
+    fenetre.blit(tvol, (panel.x + 30, panel.y + 140))
+
+    pygame.draw.rect(fenetre, BOUTON, minus_rect, border_radius=12)
+    pygame.draw.rect(fenetre, BOUTON, plus_rect, border_radius=12)
+    fenetre.blit(police_menu.render("-", True, NOIR), (minus_rect.x + 18, minus_rect.y + 4))
+    fenetre.blit(police_menu.render("+", True, NOIR), (plus_rect.x + 16, plus_rect.y + 2))
+
+    pygame.draw.rect(fenetre, FOND, bar_rect, border_radius=10)
+    fill_w = int(bar_rect.width * vol)
+    fill_rect = pygame.Rect(bar_rect.x, bar_rect.y, fill_w, bar_rect.height)
+    pygame.draw.rect(fenetre, BOUTON_ACTIF, fill_rect, border_radius=10)
+
+    tv = police.render(f"{vol_pct} %", True, BLANC)
+    fenetre.blit(tv, (bar_rect.centerx - tv.get_width() // 2, bar_rect.y - 2))
+
+    hint = police_petite.render("Cliquez hors du panneau pour fermer", True, BOUTON_ACTIF)
+    fenetre.blit(hint, (panel.x + 30, panel.bottom - 30))
+
+    return panel, toggle_rect, minus_rect, plus_rect, bar_rect
+
+# -----------------------------
+# AJOUT : Historique (UI)
+# -----------------------------
+
+def draw_history_panel(surface, game_obj):
+    """
+    Affiche les 5 dernières manches dans frame_gauche (UI only).
+    Données = game_obj.historique_manches (moteur).
+    """
+    if game_obj is None:
+        return
+
+    # boîte
+    box = pygame.Rect(10, 18, GAUCHE_W - 20, (HAUTEUR - HAUT_H) - 36)
+    pygame.draw.rect(surface, FOND, box, border_radius=12)
+    pygame.draw.rect(surface, VERT_NATURE, box, 2, border_radius=12)
+
+    titre = police_petite.render("Historique (5)", True, BLANC)
+    surface.blit(titre, (box.x + 10, box.y + 10))
+
+    # dernières entrées
+    lignes = []
+    hist = getattr(game_obj, "historique_manches", [])
+    if hist:
+        derniers = hist[-5:][::-1]  # plus récent en haut
+        for h in derniers:
+            car = h.get("carac", "")
+            car_label = {"poids": "Pds", "longueur": "Lng", "longevite": "Vlv"}.get(car, car)
+            a = h.get("actif", "?")
+            p = h.get("passif", "?")
+            va = h.get("v_actif", "?")
+            vp = h.get("v_passif", "?")
+            g = h.get("gagnant", "?")
+            lignes.append(f"{a} vs {p}")
+            lignes.append(f"{car_label}: {va} / {vp} -> {g}")
+            lignes.append("")  # espace
+    else:
+        lignes = ["Aucune manche", "jouée pour", "l'instant."]
+
+    # rendu (wrap)
+    y = box.y + 38
+    max_w = box.width - 20
+    for l in lignes:
+        if not l:
+            y += 10
+            continue
+        for ll in wrap_lines(l, police_petite, max_w):
+            surface.blit(police_petite.render(ll, True, BLANC), (box.x + 10, y))
+            y += 18
+        if y > box.bottom - 12:
+            break
 
 # ============================================================
 # ========================= ETATS UI ==========================
@@ -604,7 +763,6 @@ def layout_start():
 
 def layout_victory_panel():
     panel = pygame.Rect(GAUCHE_W + 110, HAUT_H + 90, LARGEUR - GAUCHE_W - 220, HAUTEUR - HAUT_H - 180)
-    # boutons centrés dans panel
     victory_replay_rect.width, victory_replay_rect.height = 260, 60
     victory_quit_rect.width, victory_quit_rect.height = 260, 60
 
@@ -635,13 +793,11 @@ def robot_joue_si_besoin():
     if game is None:
         return
 
-    # si déjà finie, on va au END (écran victoire dédié)
     if game.terminee:
         ui_state_to_end()
         return
 
     if ui_state == UI_PLAY and game.actif_est_robot():
-        # clic "virtuel" -> petit feedback
         play(S_CLICK, 0.6)
 
         carte = game.joueur_actif.carte_visible()
@@ -659,14 +815,88 @@ def robot_joue_si_besoin():
         label = {"poids": "Poids", "longueur": "Longueur", "longevite": "Longévité"}[car]
         message_ui = f"{label} : {game.derniere_val_actif} vs {game.derniere_val_passif} — {game.dernier_gagnant.nom} gagne"
 
-
         start_round_animation()
 
-# Répétition clavier (prénom)
+# Répétition clavier (prénom) :contentReference[oaicite:3]{index=3}
 pygame.key.set_repeat(350, 35)
 
 clock = pygame.time.Clock()
 running = True
+
+# ============================================================
+# ======================== DRAW CARD =========================
+# ============================================================
+
+def draw_card(surface, joueur, est_actif, highlight=False):
+    # base
+    pygame.draw.rect(surface, CARTE_COL, zone_carte, border_radius=12)
+
+    # bordure actif / highlight animation
+    if highlight:
+        pygame.draw.rect(surface, BOUTON_ACTIF, zone_carte, width=8, border_radius=12)
+    elif est_actif:
+        pygame.draw.rect(surface, BOUTON_ACTIF, zone_carte, width=4, border_radius=12)
+
+    carte = joueur.carte_visible()
+    if carte is None:
+        name = police.render(joueur.nom, True, NOIR)
+        surface.blit(name, (30, 28))
+        surface.blit(police.render("Plus de cartes", True, NOIR), (30, 120))
+        txt_count = police_petite.render(f"Cartes : {len(joueur.cartes)}", True, BLANC)
+        surface.blit(txt_count, (20, surface.get_height() - 28))
+        return
+
+    # ---------------------------------------------------------
+    # Affichage image : carte adverse éventuellement cachée
+    # ---------------------------------------------------------
+    cacher_adverse = False
+    try:
+        if game is not None and joueur is not game.joueur_actif and not SETTINGS.get("show_opponent_card", True):
+            cacher_adverse = True
+    except Exception:
+        cacher_adverse = False
+
+    if cacher_adverse:
+        # dos de carte simple (aucun asset requis)
+        pygame.draw.rect(surface, (180, 170, 150), zone_carte, border_radius=12)
+        pygame.draw.rect(surface, NOIR, zone_carte, width=3, border_radius=12)
+        txt1 = police.render("Carte cachée", True, NOIR)
+        surface.blit(txt1, (zone_carte.centerx - txt1.get_width() // 2, zone_carte.centery - 15))
+    else:
+        img = charger_image_carte(carte.path_image, zone_carte.width, zone_carte.height)
+
+        if img is not None:
+            r = img.get_rect()
+            r.center = zone_carte.center
+            surface.blit(img, r.topleft)
+        else:
+            pygame.draw.rect(surface, CARTE_COL, zone_carte, border_radius=12)
+            pygame.draw.rect(surface, NOIR, zone_carte, width=2, border_radius=12)
+            surface.blit(police.render(joueur.nom, True, NOIR), (30, 28))
+            surface.blit(police.render(carte.nom, True, NOIR), (30, 62))
+            surface.blit(police.render("Image introuvable", True, NOIR), (30, 120))
+
+    # Bandeau semi-transparent (SRCALPHA) :contentReference[oaicite:4]{index=4}
+    bandeau = pygame.Surface((zone_carte.width, 30), pygame.SRCALPHA)
+    bandeau.fill((0, 0, 0, 90))
+    surface.blit(bandeau, (zone_carte.x, zone_carte.y))
+    surface.blit(police_petite.render(joueur.nom, True, BLANC), (zone_carte.x + 10, zone_carte.y + 7))
+
+    # Message debug uniquement sur la carte adverse quand elle est visible
+    try:
+        if (game is not None and joueur is not game.joueur_actif
+            and SETTINGS.get("show_opponent_card", True)):
+            dbg = police_petite.render("(Mode debug : en vrai on ne voit pas la carte)", True, BOUTON_ACTIF)
+            dbg_bg = pygame.Surface((dbg.get_width() + 12, dbg.get_height() + 6), pygame.SRCALPHA)
+            dbg_bg.fill((0, 0, 0, 140))
+            surface.blit(dbg_bg, (zone_carte.x + 10, zone_carte.y + 36))
+            surface.blit(dbg, (zone_carte.x + 16, zone_carte.y + 39))
+    except Exception:
+        pass
+
+    # Indication du nombre de cartes : en bas (hors carte)
+    txt_count = police_petite.render(f"Cartes : {len(joueur.cartes)}", True, BLANC)
+    surface.blit(txt_count, (20, surface.get_height() - 28))
 
 # ============================================================
 # ============================ BOUCLE =========================
@@ -682,14 +912,14 @@ while running:
             if game is not None and game.terminee:
                 ui_state_to_end()
             else:
-                ui_state = UI_RESULT  # on garde le clic pour continuer
+                ui_state = UI_RESULT
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
         # clavier : saisie prénom
-        if ui_state == UI_START and event.type == pygame.KEYDOWN and prenom_actif and not afficher_regles and not afficher_apropos:
+        if ui_state == UI_START and event.type == pygame.KEYDOWN and prenom_actif and not afficher_regles and not afficher_apropos and not afficher_options:
             if event.key == pygame.K_BACKSPACE:
                 prenom = prenom[:-1]
             elif event.key == pygame.K_RETURN:
@@ -699,10 +929,31 @@ while running:
                     if event.unicode.isalnum() or event.unicode in [" ", "-", "_"]:
                         prenom += event.unicode
 
+        # AJOUT : raccourcis 1/2/3 en jeu (KEYDOWN) :contentReference[oaicite:5]{index=5}
+        if event.type == pygame.KEYDOWN:
+            if (ui_state == UI_PLAY and game is not None and not game.actif_est_robot()
+                and not game.terminee and not afficher_regles and not afficher_apropos and not afficher_options):
+
+                mapping = {
+                    pygame.K_1: ("Poids", "poids"),
+                    pygame.K_KP1: ("Poids", "poids"),
+                    pygame.K_2: ("Longueur", "longueur"),
+                    pygame.K_KP2: ("Longueur", "longueur"),
+                    pygame.K_3: ("Longévité", "longevite"),
+                    pygame.K_KP3: ("Longévité", "longevite"),
+                }
+                if event.key in mapping:
+                    label, key = mapping[event.key]
+                    play(S_CLICK, 0.7)
+
+                    game.appliquer_manche(key)
+                    message_ui = f"{label} : {game.derniere_val_actif} vs {game.derniere_val_passif} — {game.dernier_gagnant.nom} gagne"
+                    start_round_animation()
+
         if event.type == pygame.MOUSEBUTTONDOWN:
             x, y = event.pos
 
-            # Overlay règles / à propos : clic pour fermer
+            # Overlay règles / à propos
             if afficher_regles:
                 if 120 <= x <= LARGEUR - 120 and 90 <= y <= HAUTEUR - 90:
                     afficher_regles = False
@@ -712,6 +963,31 @@ while running:
                 if 120 <= x <= LARGEUR - 120 and 90 <= y <= HAUTEUR - 90:
                     afficher_apropos = False
                     play(S_CLICK, 0.6)
+                continue
+
+            # AJOUT : overlay options (interaction)
+            if afficher_options:
+                panel, toggle_rect, minus_rect, plus_rect, bar_rect = layout_options_panel()
+
+                # clic hors panneau -> fermer
+                if not panel.collidepoint(x, y):
+                    afficher_options = False
+                    play(S_CLICK, 0.6)
+                    continue
+
+                # clic dans panneau -> gérer boutons
+                if toggle_rect.collidepoint(x, y):
+                    SETTINGS["show_opponent_card"] = not SETTINGS.get("show_opponent_card", True)
+                    play(S_CLICK, 0.6)
+                elif minus_rect.collidepoint(x, y):
+                    SETTINGS["volume"] = clamp01(SETTINGS.get("volume", 0.8) - 0.1)
+                    play(S_CLICK, 0.6)
+                elif plus_rect.collidepoint(x, y):
+                    SETTINGS["volume"] = clamp01(SETTINGS.get("volume", 0.8) + 0.1)
+                    play(S_CLICK, 0.6)
+                else:
+                    # clic ailleurs dans le panneau : rien
+                    pass
                 continue
 
             # hamburger
@@ -734,6 +1010,8 @@ while running:
                                 afficher_regles = True
                             elif opt == "À propos":
                                 afficher_apropos = True
+                            elif opt == "Options":
+                                afficher_options = True
                             elif opt == "Rejouer":
                                 ui_state = UI_START
                                 game = None
@@ -798,13 +1076,8 @@ while running:
                     if rect.collidepoint(local_x, local_y):
                         play(S_CLICK, 0.7)
 
-                        actif_avant = game.joueur_actif
                         game.appliquer_manche(key)
-
                         message_ui = f"{label} : {game.derniere_val_actif} vs {game.derniere_val_passif} — {game.dernier_gagnant.nom} gagne"
-
-
-
                         start_round_animation()
                         break
 
@@ -835,6 +1108,10 @@ while running:
             pygame.draw.rect(frame_gauche, FOND, rect, border_radius=10)
             txt = police.render(options[i], True, BLANC)
             frame_gauche.blit(txt, (rect.x + 18, rect.y + 12))
+    else:
+        # AJOUT : Historique (quand menu fermé) pour ne pas chevaucher
+        if ui_state != UI_START and game is not None:
+            draw_history_panel(frame_gauche, game)
 
     # START
     if ui_state == UI_START:
@@ -869,7 +1146,7 @@ while running:
         for label, mode, rect in start_buttons:
             dessiner_bouton(fenetre, rect, label, actif=True)
 
-        hint = police_petite.render("Menu ≡ : Rejouer / Règles / À propos / Quitter", True, BLANC)
+        hint = police_petite.render("Menu ≡ : Rejouer / Options / Règles / À propos / Quitter", True, BLANC)
         fenetre.blit(hint, (box.x + 70, box.bottom - 30))
 
     else:
@@ -878,7 +1155,6 @@ while running:
             est_actif_j1 = (game.joueur_actif is game.joueurs[0])
             est_actif_j2 = (game.joueur_actif is game.joueurs[1])
 
-            # highlight animation: bordure forte sur le gagnant de la manche
             highlight_j1 = (ui_state == UI_ANIM and anim_winner_index == 0)
             highlight_j2 = (ui_state == UI_ANIM and anim_winner_index == 1)
 
@@ -918,22 +1194,22 @@ while running:
         fenetre.blit(frame_gauche, (0, HAUT_H))
         fenetre.blit(frame_jeu, (GAUCHE_W, HAUT_H))
 
-    # ===================== OVERLAY RÈGLES =====================
+    # ===================== OVERLAYS =====================
     if afficher_regles:
         draw_overlay_box("Règles du jeu", regles_texte)
 
-    # ===================== OVERLAY À PROPOS ===================
     if afficher_apropos:
         draw_overlay_box("À propos / Robots", apropos_texte)
 
+    if afficher_options:
+        draw_options_overlay()
+
     # ===================== ECRAN VICTOIRE DEDIE =====================
     if ui_state == UI_END:
-        # jouer le son de victoire une seule fois
         if game is not None and game.terminee and (not victory_sound_played):
             play(S_VICTORY, 0.9)
             victory_sound_played = True
 
-        # overlay sombre
         overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
         fenetre.blit(overlay, (0, 0))
@@ -950,7 +1226,6 @@ while running:
             tmsg = police.render(msg, True, BOUTON_ACTIF)
             fenetre.blit(tmsg, (panel.x + 30, panel.y + 80))
 
-            # stats simples
             j1, j2 = game.joueurs[0], game.joueurs[1]
             s1 = police.render(f"{j1.nom} : {len(j1.cartes)} cartes", True, BLANC)
             s2 = police.render(f"{j2.nom} : {len(j2.cartes)} cartes", True, BLANC)
@@ -960,7 +1235,6 @@ while running:
             tmsg = police.render("Partie terminée", True, BOUTON_ACTIF)
             fenetre.blit(tmsg, (panel.x + 30, panel.y + 80))
 
-        # Boutons directs
         dessiner_bouton(fenetre, victory_replay_rect, "Rejouer", actif=True)
         dessiner_bouton(fenetre, victory_quit_rect, "Quitter", actif=False)
 
