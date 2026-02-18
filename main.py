@@ -126,7 +126,7 @@ def choix_robot_triche_absolue(carte_jouee,carte_subie):
     else:
         return choix_robot_aleatoire()
 
-def choix_robot_intelligent(carte, liste_cartes_totales):
+def choix_robot_intelligent_triche(carte, liste_cartes_totales):
     """
     Robot I : compare sa carte à une valeur de référence (médiane) issue
     des cartes déjà jouées, et choisit la caractéristique la plus "forte" relativement.
@@ -1301,3 +1301,4 @@ while running:
 
 pygame.quit()
 sys.exit()
+
