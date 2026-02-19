@@ -1,0 +1,19 @@
+STRATÉGIES DE ROBOTS — Défi Nature
+
+1) Stratégies naïves
+- Aléatoire : choisit une caractéristique au hasard. (✓)
+- Première caractéristique : joue toujours “poids”. (✓)
+
+2) Stratégie la plus forte (avec triche)
+- Connaît sa carte ET la carte adverse :
+  choisit une caractéristique gagnante si possible. (✓)
+
+3) Stratégies intermédiaires (sans voir la carte adverse)
+- Moyenne + ratio :
+  compare sa carte à la moyenne des cartes déjà jouées et choisit le meilleur ratio. (✓)
+- Médiane + ratio :
+  compare sa carte à la médiane des cartes déjà jouées et choisit le meilleur ratio. (✓)
+
+4) Variante (avec information globale)
+- Connaît toutes les cartes du jeu :
+  calcule une médiane “globale” et choisit la caractéristique la plus avantageuse. (✓)
