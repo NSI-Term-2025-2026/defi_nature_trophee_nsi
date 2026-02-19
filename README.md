@@ -1,29 +1,65 @@
-# Jeu de Cartes Animaux – Projet Python / NSI
+# 🐾 Défi Nature — Projet NSI (Terminale) | Jeu de cartes en Python (Pygame)
 
-## Description
-Ce projet est une simulation d’un jeu de cartes en Python, développée dans le cadre du programme de Terminale NSI.  
-Le jeu oppose deux joueurs, humains ou IA, qui s’affrontent en comparant les caractéristiques d’animaux (poids, longueur et longévité). À chaque tour, un joueur choisit une caractéristique et la compare avec celle de l’adversaire. Le joueur possédant la valeur la plus élevée remporte la carte adverse.
+## 📌 Présentation du projet
+Ce dépôt contient une **recréation du jeu de société Défi Nature** sous forme de jeu vidéo en **Python** (interface **Pygame**).
+Deux joueurs (humains ou robots) s’affrontent avec des cartes “Animaux” contenant 3 caractéristiques :
 
-Le programme inclut un système de distribution équilibrée des cartes et permet de jouer contre un autre joueur ou contre un robot, configurable en mode aléatoire ou intelligent.
+- **Poids**
+- **Longueur**
+- **Longévité**
 
----
-
-## Fonctionnalités
-
-- Simulation de parties entre deux joueurs humains ou contre un robot
-- Choix de la caractéristique à comparer à chaque tour : poids, longueur ou longévité
-- Distribution équilibrée des cartes sans modifier la liste initiale
-- Robot configurable : mode aléatoire ou mode intelligent basé sur un quotient des caractéristiques par rapport à la médiane
-- Affichage détaillé des cartes et des résultats de chaque manche
-- Suivi du nombre de cartes restantes pour chaque joueur
+À chaque manche, le joueur actif choisit une caractéristique, puis on compare les valeurs :
+✅ **La valeur strictement la plus grande gagne**  
+⚠️ **En cas d’égalité, le joueur actif perd la manche** (règle volontaire pour éviter les matchs nuls).
 
 ---
 
-## Installation et exécution
+## 🚀 Fonctionnalités principales
 
-1. Cloner le dépôt :
+### 🎮 Gameplay
+- Modes de jeu :
+  - **Joueur vs Joueur**
+  - **Joueur vs Robot (aléatoire)**
+  - **Joueur vs Robot (intelligent)**
+- Réinsertion des cartes de façon **aléatoire** pour éviter les boucles trop prévisibles
+- Affichage complet : cartes, tours, résultats de manche, nombre de cartes restantes
+- Menu “hamburger” (Rejouer / Options / Règles / À propos / Quitter)
 
-```bash
-git clone https://github.com/AntoCheMaestro/jeu_cartes_animaux.git
-cd jeu_cartes_animaux
-python main.py
+### 🧠 IA (Robots)
+Plusieurs stratégies sont disponibles (et documentées) :
+- **Aléatoire** : choisit une caractéristique au hasard
+- **Première caractéristique** : joue toujours “poids”
+- **Triche (max)** : connaît sa carte + la carte adverse (choisit une caractéristique gagnante si possible)
+- **Intermédiaire (stats)** : compare sa carte à une **moyenne** ou une **médiane** de l’historique
+- **Variante globale** : connaît toutes les cartes du jeu (médiane “globale”)
+
+➡️ Détails dans : `strategies/strategies.txt`
+
+---
+
+## 🧩 Architecture (séparation cerveau / interface)
+Le projet est organisé pour séparer :
+- ✅ **Le moteur du jeu (règles, joueurs, robots, données)** → `cerveau.py`
+- ✅ **L’interface graphique Pygame** → `game_pygame.py`
+- ✅ **Le point d’entrée (lancement du jeu)** → `main.py`
+
+🎯 Objectif important : pouvoir faire tourner des **simulations / statistiques** sans dépendre de Pygame (utile sur un PC où Pygame n’est pas installé).
+
+---
+
+## 📂 Structure du projet
+
+```text
+defi_nature_trophee_nsi/
+│
+├── main.py                  # Point d'entrée (lance le jeu)
+├── cerveau.py               # Moteur du jeu : règles + robots + données
+├── game_pygame.py           # Interface Pygame (UI uniquement)
+├── requirements.txt          
+│
+├── assets/                  # Ressources du jeu
+│   ├── images/animaux/      # Images des cartes (nommage = nom_animal.png)
+│   └── sounds/              # Sons (click, victory, etc.)
+│
+└── strategies/
+    └── strategies.txt       # Liste des stratégies de robots
