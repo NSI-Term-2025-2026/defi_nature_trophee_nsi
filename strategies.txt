@@ -6,9 +6,7 @@ le plus fort possible:
 - si il sait ta carte et sa carte         v
 
 strategie intermediare: 
-- choix a l'aide de la moyenne et d'un ration            v
+- choix a l'aide de la moyenne et d'un ratio         v
 - choix a l'aide de la medianne et d'un ratio            v
 
 - le bot connait toutes les cartes -> medianne           v
-
-le plus fort sans tricher: revision bayesienne (formule de Bayes)
