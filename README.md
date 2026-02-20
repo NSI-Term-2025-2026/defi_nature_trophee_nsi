@@ -55,6 +55,7 @@ defi_nature_trophee_nsi/
 ├── main.py                  # Point d'entrée (lance le jeu)
 ├── cerveau.py               # Moteur du jeu : règles + robots + données
 ├── game_pygame.py           # Interface Pygame (UI uniquement)
+├── stats.py                 # Menu de statistiques entre choix robots
 ├── requirements.txt          
 │
 ├── assets/                  # Ressources du jeu
