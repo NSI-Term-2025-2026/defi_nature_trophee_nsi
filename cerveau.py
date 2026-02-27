@@ -144,6 +144,100 @@ def choix_robot_intelligent_triche(carte, liste_cartes_totales):
     }
     return max(scores, key=scores.get)
 
+# ================= MONTE CARLO SIMPLE =================
+
+def copie_partie_simple(game):
+    j1 = Joueur(game.joueurs[0].nom, game.joueurs[0].cartes.copy())
+    j2 = Joueur(game.joueurs[1].nom, game.joueurs[1].cartes.copy())
+
+    nouvelle = GameState(j1, j2, mode_robot=None)
+
+    if game.joueur_actif.nom == j1.nom:
+        nouvelle.joueur_actif = nouvelle.joueurs[0]
+        nouvelle.joueur_passif = nouvelle.joueurs[1]
+    else:
+        nouvelle.joueur_actif = nouvelle.joueurs[1]
+        nouvelle.joueur_passif = nouvelle.joueurs[0]
+
+    return nouvelle
+
+
+def simuler_partie_aleatoire(game, max_tours=100):
+    tours = 0
+    while not game.terminee and tours < max_tours:
+        carac = choix_robot_aleatoire()
+        game.appliquer_manche(carac)
+        tours += 1
+
+    if game.gagnant:
+        return game.gagnant.nom
+    return None
+
+
+def simuler_partie_median(game, max_tours=100):
+    tours = 0
+    while not game.terminee and tours < max_tours:
+        carte = game.joueur_actif.carte_visible()
+        if carte is None:
+            return None
+        carac = choix_robot_intelligent(carte, game.historique_cartes)
+        game.appliquer_manche(carac)
+        tours += 1
+
+    if game.gagnant:
+        return game.gagnant.nom
+    return None
+
+
+def choix_robot_monte_carlo_random(game, essais=15):
+    caracs = ["poids", "longueur", "longevite"]
+    nom_actif = game.joueur_actif.nom
+
+    meilleur = "poids"
+    meilleur_score = -1
+
+    for carac in caracs:
+        victoires = 0
+
+        for i in range(essais):
+            test = copie_partie_simple(game)
+            test.appliquer_manche(carac)
+            gagnant = simuler_partie_aleatoire(test)
+
+            if gagnant == nom_actif:
+                victoires += 1
+
+        if victoires > meilleur_score:
+            meilleur_score = victoires
+            meilleur = carac
+
+    return meilleur
+
+
+def choix_robot_monte_carlo_median(game, essais=15):
+    caracs = ["poids", "longueur", "longevite"]
+    nom_actif = game.joueur_actif.nom
+
+    meilleur = "poids"
+    meilleur_score = -1
+
+    for carac in caracs:
+        victoires = 0
+
+        for i in range(essais):
+            test = copie_partie_simple(game)
+            test.appliquer_manche(carac)
+            gagnant = simuler_partie_median(test)
+
+            if gagnant == nom_actif:
+                victoires += 1
+
+        if victoires > meilleur_score:
+            meilleur_score = victoires
+            meilleur = carac
+
+    return meilleur
+
 
 class GameState:
     """
@@ -348,6 +442,7 @@ _RACINE = _trouver_racine_projet()
 _CSV_PATH = _RACINE / "data" / "animaux.csv"
 _animaux_csv = charger_animaux_csv(_CSV_PATH)
 if _animaux_csv:
+    print('csv trouve')
     LISTE_ANIMAUX = _animaux_csv
 
 
