@@ -60,7 +60,7 @@ def run():
 
     # AJOUT : paramètres UI simples (menu Options)
     SETTINGS = {
-        "show_opponent_card": True,  # debug : montre l'adversaire (carte visible)
+        "show_opponent_card": False,  # debug : montre l'adversaire (carte visible)
         "volume": 0.8               # volume global [0.0, 1.0]
     }
 
