@@ -395,18 +395,4 @@ if __name__ == "__main__":
     run_stats()
 
 
-# COMMANDES EN CONSOLE POUR TESTS
-"""
-Comparer deux strategies: Ici Monte carlo random et median 
--print(comparer_deux_strategies(STRATEGIES[4],STRATEGIES[2],75,12345))
 
-print(comparer_deux_strategies(STRATEGIES[4],STRATEGIES[2],500,12345))
-{'A': 'MonteCarlo_random', 'B': 'MedianRatio(hist)', 'n_games': 500, 'wins_A': 237, 'wins_B': 263, 
-'winrate_A_pct': 47.4, 'winrate_B_pct': 52.6, 
-'avg_rounds_overall': 59.906, 'avg_rounds_when_A_wins': 62.55696202531646, 'avg_rounds_when_B_wins': 57.5171102661597}
-
-print(comparer_deux_strategies(STRATEGIES[4],STRATEGIES[2],1000,12345))
-{'A': 'MonteCarlo_random', 'B': 'MedianRatio(hist)', 'n_games': 1000, 'wins_A': 476, 'wins_B': 524, 
-'winrate_A_pct': 47.6, 'winrate_B_pct': 52.4, 
-'avg_rounds_overall': 59.63, 'avg_rounds_when_A_wins': 62.1890756302521, 'avg_rounds_when_B_wins': 57.30534351145038}
-"""
