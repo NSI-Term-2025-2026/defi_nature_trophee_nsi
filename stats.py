@@ -2,26 +2,26 @@
 """
 Stats / simulations (sans pygame).
 
-But :
+Objectif (niveau Terminale NSI, code lisible) :
 - Comparer des stratégies entre elles sur N parties.
-- Mesurer "à quel point" une stratégie est meilleure qu'une autre.
+- Afficher :
+  1) le winrate
+  2) la vitesse (nombre moyen de manches)
+  3) une incertitude (IC 95% sur le winrate)
+- IMPORTANT : certaines stratégies sont très longues (Monte Carlo, etc.).
+  On adapte automatiquement :
+  - Petites stratégies : peu de parties, 1 seule expérience (rapide)
+  - Grosses stratégies : plus de parties + répétitions (stat "sérieuse")
 
-Indicateurs demandés :
-1) Winrate : sur N parties, % de victoires de A contre B
-2) Vitesse : nombre moyen de manches quand A gagne (et quand B gagne)
-
-Important :
-- Ce fichier N'IMPORTE PAS pygame, donc il tourne sur le PC des vacances.
-- On utilise des seeds pour rendre les résultats reproductibles (mêmes résultats
-  si on relance avec les mêmes paramètres).
+Aucune dépendance pygame.
 """
 
 import random
-from dataclasses import dataclass
+import csv
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-# On importe uniquement le "cerveau" (logique du jeu / bots / cartes)
-from cerveau import (
+from sources.cerveau import (
     Joueur, GameState, LISTE_ANIMAUX, distribuer_cartes,
     choix_robot_aleatoire,
     choix_robot_aleatoire_premiere_caracteristique,
@@ -30,56 +30,48 @@ from cerveau import (
     choix_robot_triche_absolue,
     choix_robot_intelligent_triche,
     choix_robot_monte_carlo_random,
-    choix_robot_monte_carlo_median)
-
-NOMBRE_PARTIES_EFFECTUE = 0
+    choix_robot_monte_carlo_median
+)
 
 # ============================================================
-# ======================= WRAPPERS STRATEGIES =================
+# ======================= STRATEGIES ==========================
 # ============================================================
 
-@dataclass(frozen=True)
 class Strategie:
     """
-    Petite structure de données pour stocker une stratégie.
+    Structure simple (sans dataclass) :
 
-    - nom : nom lisible pour l'affichage console.
-    - choisir : fonction qui reçoit l'état du jeu (GameState) et renvoie
-      la caractéristique choisie : "poids", "longueur" ou "longevite".
+    - nom : nom lisible
+    - choisir(etat) : fonction qui renvoie "poids" / "longueur" / "longevite"
     """
-    nom: str
-    choisir: Callable[[GameState], str]
+    def __init__(self, nom: str, choisir: Callable[[GameState], str]):
+        self.nom = nom
+        self.choisir = choisir
 
 
 def _safe_carac(carac: str) -> str:
-    """
-    Sécurise la caractéristique renvoyée par une stratégie.
-    Si une stratégie renvoie quelque chose d'invalide, on retombe sur "poids"
-    pour éviter un crash.
-    """
-    if carac.lower() in ("poids", "longueur", "longevite"):
-        return carac.lower()
+    """Sécurise la caractéristique (évite crash si stratégie bug)."""
+    if isinstance(carac, str):
+        c = carac.lower()
+        if c in ("poids", "longueur", "longevite"):
+            return c
     return "poids"
 
 
-def _carte_actif(game: GameState):
-    """
-    Raccourci : récupérer la carte visible du joueur actif.
-    """
-    return game.joueur_actif.carte_visible()
+def _carte_actif(etat: GameState):
+    """Raccourci : carte visible du joueur actif."""
+    return etat.joueur_actif.carte_visible()
 
 
 # -----------------------
 # Stratégies "naïves"
 # -----------------------
 
-def strat_random(game: GameState) -> str:
-    """Choisit une caractéristique au hasard."""
+def strat_random(etat: GameState) -> str:
     return _safe_carac(choix_robot_aleatoire())
 
 
-def strat_first(game: GameState) -> str:
-    """Choisit toujours la première caractéristique (ici: poids)."""
+def strat_first(etat: GameState) -> str:
     return _safe_carac(choix_robot_aleatoire_premiere_caracteristique())
 
 
@@ -87,68 +79,52 @@ def strat_first(game: GameState) -> str:
 # Stratégies "intermédiaires"
 # -----------------------
 
-def strat_median_hist(game: GameState) -> str:
-    """
-    Compare sa carte à une médiane calculée sur l'historique des cartes jouées.
-    (Ton bot "intelligent" médiane/ratio)
-    """
-    carte = _carte_actif(game)
+def strat_median_hist(etat: GameState) -> str:
+    carte = _carte_actif(etat)
     if carte is None:
         return _safe_carac(choix_robot_aleatoire())
-    return _safe_carac(choix_robot_intelligent(carte, game.historique_cartes))
+    return _safe_carac(choix_robot_intelligent(carte, etat.historique_cartes))
 
 
-def strat_mean_hist(game: GameState) -> str:
-    """
-    Même idée que la médiane, mais avec la moyenne (mean) sur l'historique.
-    """
-    carte = _carte_actif(game)
+def strat_mean_hist(etat: GameState) -> str:
+    carte = _carte_actif(etat)
     if carte is None:
         return _safe_carac(choix_robot_aleatoire())
-    return _safe_carac(choix_robot_intelligent_moyenne(carte, game.historique_cartes))
-
-def strat_monte_carlo_random(game: GameState) -> str:
-    return _safe_carac(choix_robot_monte_carlo_random(game, essais=30))
-
-
-def strat_monte_carlo_median(game: GameState) -> str:
-    return _safe_carac(choix_robot_monte_carlo_median(game, essais=30))
+    return _safe_carac(choix_robot_intelligent_moyenne(carte, etat.historique_cartes))
 
 
 # -----------------------
-# Stratégies "fortes / triche"
+# Monte Carlo (coûteux)
 # -----------------------
 
-def strat_cheat_absolute(game: GameState) -> str:
-    """
-    "Le plus fort possible" :
-    le bot connaît sa carte ET la carte adverse.
-    Il choisit une caractéristique gagnante s'il en existe une, sinon aléatoire.
-    """
-    carte_jouee = game.joueur_actif.carte_visible()
-    carte_subie = game.joueur_passif.carte_visible()
+def strat_monte_carlo_random(etat: GameState) -> str:
+    return _safe_carac(choix_robot_monte_carlo_random(etat, essais=30))
 
+
+def strat_monte_carlo_median(etat: GameState) -> str:
+    return _safe_carac(choix_robot_monte_carlo_median(etat, essais=30))
+
+
+# -----------------------
+# Triche (fort)
+# -----------------------
+
+def strat_cheat_absolute(etat: GameState) -> str:
+    carte_jouee = etat.joueur_actif.carte_visible()
+    carte_subie = etat.joueur_passif.carte_visible()
     if carte_jouee is None or carte_subie is None:
         return _safe_carac(choix_robot_aleatoire())
-
     return _safe_carac(choix_robot_triche_absolue(carte_jouee, carte_subie))
 
 
-def strat_cheat_median_allcards(game: GameState) -> str:
-    """
-    Triche "médiane globale" :
-    le bot connaît la distribution complète des cartes (LISTE_ANIMAUX),
-    et calcule la médiane sur TOUTES les cartes existantes.
-    (Il ne connaît pas forcément la carte adverse, mais il connaît le "jeu complet".)
-    """
-    carte = _carte_actif(game)
+def strat_cheat_median_allcards(etat: GameState) -> str:
+    carte = _carte_actif(etat)
     if carte is None:
         return _safe_carac(choix_robot_aleatoire())
-
     return _safe_carac(choix_robot_intelligent_triche(carte, LISTE_ANIMAUX))
 
 
-# Liste officielle des stratégies testées
+# Liste officielle
 STRATEGIES: List[Strategie] = [
     Strategie("Random", strat_random),
     Strategie("FirstStat(poids)", strat_first),
@@ -160,239 +136,539 @@ STRATEGIES: List[Strategie] = [
     Strategie("CheatMedianAllCards(median global)", strat_cheat_median_allcards),
 ]
 
-# Dictionnaire pratique si un jour tu veux sélectionner par nom
-STRATEGY_BY_NAME: Dict[str, Strategie] = {s.nom: s for s in STRATEGIES}
+STRATEGIE_PAR_NOM: Dict[str, Strategie] = {s.nom: s for s in STRATEGIES}
+
+
+# ============================================================
+# ======================= GROUPES (IMPORTANT) =================
+# ============================================================
+
+PETITES_STRATS = {
+    "Random",
+    "FirstStat(poids)",
+    "MeanRatio(hist)",  # tu peux le mettre en "grosse" si tu veux
+}
+
+GROSSES_STRATS = {
+    "MedianRatio(hist)",
+    "MonteCarlo_random",
+    "MonteCarlo_median",
+    "CheatAbsolute(see both)",
+}
+
+
+def est_grosse_strategie(strat: Strategie) -> bool:
+    return strat.nom in GROSSES_STRATS
+
+
+def est_petite_strategie(strat: Strategie) -> bool:
+    return strat.nom in PETITES_STRATS
+
+
+# ============================================================
+# ======================= OUTILS STATS ========================
+# ============================================================
+
+def ic95_proportion(nb_succes: int, n: int) -> Tuple[float, float]:
+    """
+    Intervalle de confiance 95% (méthode de Wilson) pour une proportion p = nb_succes/n.
+    Retour en proportions (0..1).
+
+    Remarque : Wilson est en général plus fiable que l'approximation normale
+    quand p est proche de 0% ou 100%.
+    """
+    if n <= 0:
+        return 0.0, 1.0
+
+    z = 1.96  # 95%
+    p = nb_succes / n
+
+    denom = 1.0 + (z * z) / n
+    centre = (p + (z * z) / (2.0 * n)) / denom
+    demi_largeur = (z / denom) * ((p * (1.0 - p) / n) + (z * z) / (4.0 * n * n)) ** 0.5
+
+    bas = max(0.0, centre - demi_largeur)
+    haut = min(1.0, centre + demi_largeur)
+    return bas, haut
+
+
+def moyenne(liste: List[float]) -> float:
+    return (sum(liste) / len(liste)) if liste else float("nan")
+
+
+def ecart_type(liste: List[float]) -> float:
+    if not liste:
+        return float("nan")
+    m = moyenne(liste)
+    var = sum((x - m) ** 2 for x in liste) / len(liste)
+    return var ** 0.5
+
+
+# ============================================================
+# ======================= EXPORT CSV ==========================
+# ============================================================
+
+def chemin_results_csv() -> Path:
+    return Path("data") / "results.csv"
+
+
+def ecrire_ligne_csv(res: Dict[str, object]) -> None:
+    path = chemin_results_csv()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    colonnes = [
+        "mode",
+        "A", "B",
+        "n_games",
+        "seed",
+        "wins_A", "wins_B",
+        "winrate_A_pct", "winrate_B_pct",
+        "winrate_A_ci95_low_pct", "winrate_A_ci95_high_pct",
+        "avg_rounds_overall",
+        "avg_rounds_when_A_wins",
+        "avg_rounds_when_B_wins",
+        "n_timeouts",
+        # mode répétitions :
+        "n_repetitions",
+        "winrate_A_mean_pct",
+        "winrate_A_std_pct",
+        "winrate_A_min_pct",
+        "winrate_A_max_pct",
+        "avg_rounds_overall_mean",
+        "avg_rounds_overall_std",
+    ]
+
+    fichier_existe = path.exists()
+    with path.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=colonnes, delimiter=";")
+        if not fichier_existe:
+            writer.writeheader()
+
+        ligne = {c: res.get(c, "") for c in colonnes}
+        writer.writerow(ligne)
+
+
+# ============================================================
+# ======================= GESTION DU HASARD ===================
+# ============================================================
+
+def _executer_avec_seed_globale(seed: int, fonction):
+    """
+    Le module cerveau.py utilise le hasard via le module random (global).
+    Pour obtenir des résultats reproductibles et indépendants de l'ordre,
+    on force random.seed(seed) uniquement pendant la partie,
+    puis on restaure l'état précédent du hasard.
+    """
+    etat_hasard = random.getstate()
+    try:
+        random.seed(seed)
+        return fonction()
+    finally:
+        random.setstate(etat_hasard)
 
 
 # ============================================================
 # ======================= SIMULATION CORE ======================
 # ============================================================
 
-def creer_partie_bot_vs_bot(seed: Optional[int] = None) -> GameState:
+def creer_partie_bot_vs_bot() -> GameState:
     """
     Crée une partie BotA vs BotB.
-
-    Pourquoi une seed ?
-    - Pour rendre la distribution et le mélange de cartes reproductibles.
-    - Si on relance la même expérience, on peut obtenir exactement les mêmes résultats.
-
-    Important : on reste en mode_robot=None car ici on pilote les bots nous-mêmes
-    (on appelle strat_a / strat_b en fonction du joueur actif).
+    Le joueur qui commence est tiré au hasard.
     """
-    if seed is not None:
-        random.seed(seed)
-
     c1, c2 = distribuer_cartes(LISTE_ANIMAUX)
     j1 = Joueur("BotA", c1)
     j2 = Joueur("BotB", c2)
-    return GameState(j1, j2, mode_robot=None)
+    etat = GameState(j1, j2, mode_robot=None)
+
+    if random.random() < 0.5:
+        etat.joueur_actif, etat.joueur_passif = etat.joueur_passif, etat.joueur_actif
+
+    return etat
 
 
 def jouer_une_partie(
     strat_a: Strategie,
     strat_b: Strategie,
-    seed: Optional[int] = None,
-    max_rounds_guard: int = 5000
+    seed: int,
+    max_manches: int = 5000
 ) -> Tuple[str, int]:
     """
-    Joue UNE partie complète entre strat_a (BotA) et strat_b (BotB).
+    Joue UNE partie.
+    Retourne (gagnant, nb_manches).
+    gagnant ∈ {"BotA","BotB","TIMEOUT"}.
+    """
+    def _faire_partie():
+        etat = creer_partie_bot_vs_bot()
+        manches = 0
+
+        while (not etat.terminee) and manches < max_manches:
+            if etat.joueur_actif.nom == "BotA":
+                carac = strat_a.choisir(etat)
+            else:
+                carac = strat_b.choisir(etat)
+
+            carac = _safe_carac(carac)
+            etat.appliquer_manche(carac)
+            manches += 1
+
+        if (not etat.terminee) or (etat.gagnant is None):
+            return "TIMEOUT", manches
+
+        return etat.gagnant.nom, manches
+
+    return _executer_avec_seed_globale(seed, _faire_partie)
+
+
+def _jouer_deux_parties_symetrisees(
+    strat_a: Strategie,
+    strat_b: Strategie,
+    seed: int,
+    max_manches: int = 5000
+) -> Tuple[int, int, int]:
+    """
+    Comparaison équitable (technique "common random numbers") :
+    - Partie 1 : A en BotA contre B en BotB avec seed = seed
+    - Partie 2 : B en BotA contre A en BotB avec seed = seed
+    On agrège les 2 résultats.
 
     Retour :
-    - winner_name : "BotA" ou "BotB"
-    - nb_manches : nombre de manches jouées
-
-    max_rounds_guard :
-    - garde-fou anti-boucle infinie (normalement inutile, mais utile en dev).
+    - nb_victoires_A_sur_2
+    - nb_manches_total_sur_2
+    - nb_timeouts_sur_2
     """
-    global NOMBRE_PARTIES_EFFECTUE
-    game = creer_partie_bot_vs_bot(seed=seed)
-    rounds = 0
+    victoires_a = 0
+    manches_total = 0
+    timeouts = 0
 
-    # Tant que la partie n'est pas terminée :
-    while (not game.terminee) and rounds < max_rounds_guard:
+    # Partie 1
+    g1, m1 = jouer_une_partie(strat_a, strat_b, seed=seed, max_manches=max_manches)
+    manches_total += m1
+    if g1 == "TIMEOUT":
+        timeouts += 1
+    elif g1 == "BotA":
+        victoires_a += 1  # ici BotA = stratégie A
 
-        # Qui doit jouer ? joueur_actif = celui qui choisit la caractéristique
-        if game.joueur_actif.nom == "BotA":
-            carac = strat_a.choisir(game)
-        else:
-            carac = strat_b.choisir(game)
+    # Partie 2 (swap)
+    g2, m2 = jouer_une_partie(strat_b, strat_a, seed=seed, max_manches=max_manches)
+    manches_total += m2
+    if g2 == "TIMEOUT":
+        timeouts += 1
+    else:
+        # ici BotB = stratégie A
+        if g2 == "BotB":
+            victoires_a += 1
 
-        # Sécurité : s'assure que la stratégie a renvoyé une carac valide
-        carac = _safe_carac(carac)
-
-        # On applique la manche dans le moteur
-        game.appliquer_manche(carac)
-        rounds += 1
-
-    # Si jamais la partie n'a pas fini (devrait être très rare),
-    # on évite de crasher : on attribue un gagnant au hasard.
-    if not game.terminee or game.gagnant is None:
-        winner = random.choice(["BotA", "BotB"])
-        return winner, rounds
-    # TEST DEBUG 
-    NOMBRE_PARTIES_EFFECTUE += 1
-    print('Partie terminee: ', NOMBRE_PARTIES_EFFECTUE)
-
-    return game.gagnant.nom, rounds
+    return victoires_a, manches_total, timeouts
 
 
 def comparer_deux_strategies(
     strat_a: Strategie,
     strat_b: Strategie,
-    n_games: int = 1000,
-    seed: int = 12345
+    n_games: int,
+    seed: int,
+    print_every: int = 0,
+    export_csv: bool = True,
+    symetriser: bool = True,
+    max_manches: int = 5000,
 ) -> Dict[str, object]:
     """
-    Compare A vs B sur n_games parties.
+    UNE expérience :
+    - symetriser=True (recommandé) : on joue 2 parties par seed (A/B puis B/A)
+      => beaucoup plus robuste, et surtout indépendant de l'ordre.
+    - symetriser=False : une seule partie par seed (ancien comportement).
 
-    On calcule :
-    - winrate_A_pct / winrate_B_pct
-    - avg_rounds_overall : manches moyennes toutes parties confondues
-    - avg_rounds_when_A_wins : manches moyennes seulement parmi les victoires de A
-    - avg_rounds_when_B_wins : manches moyennes seulement parmi les victoires de B
+    Les TIMEOUTS sont comptés et exclus du winrate.
     """
-    global NOMBRE_PARTIES_EFFECTUE
-    wins_a = 0
-    wins_b = 0
+    victoires_a = 0
+    victoires_b = 0
+    manches_total = 0
+    manches_quand_a_gagne: List[int] = []
+    manches_quand_b_gagne: List[int] = []
+    nb_timeouts = 0
 
-    rounds_total = 0
-    rounds_when_a_wins: List[int] = []
-    rounds_when_b_wins: List[int] = []
+    generateur = random.Random(seed)
 
-    # On crée un générateur pseudo-aléatoire local (reproductible)
-    # Plutôt que d'utiliser random global partout.
-    rng = random.Random(seed)
+    for k in range(1, n_games + 1):
+        s = generateur.randrange(0, 2**31 - 1)
 
-    for _ in range(n_games):
-        # Pour éviter que toutes les parties aient le même mélange,
-        # on tire une seed différente pour chaque partie.
-        s = rng.randrange(0, 2**31 - 1)
+        if symetriser:
+            va2, mt2, to2 = _jouer_deux_parties_symetrisees(
+                strat_a, strat_b, seed=s, max_manches=max_manches
+            )
+            manches_total += mt2
+            nb_timeouts += to2
 
-        winner, r = jouer_une_partie(strat_a, strat_b, seed=s)
-        rounds_total += r
+            nb_valides = 2 - to2
+            victoires_a += va2
+            victoires_b += (nb_valides - va2)
 
-        if winner == "BotA":
-            wins_a += 1
-            rounds_when_a_wins.append(r)
+            # Pour rester simple (Terminale), on ne calcule pas ici les manches
+            # conditionnelles dans le mode symétrisé.
         else:
-            wins_b += 1
-            rounds_when_b_wins.append(r)
+            gagnant, m = jouer_une_partie(strat_a, strat_b, seed=s, max_manches=max_manches)
+            manches_total += m
+            if gagnant == "TIMEOUT":
+                nb_timeouts += 1
+            elif gagnant == "BotA":
+                victoires_a += 1
+                manches_quand_a_gagne.append(m)
+            else:
+                victoires_b += 1
+                manches_quand_b_gagne.append(m)
 
-    def _avg(lst: List[int]) -> float:
-        """Moyenne simple; renvoie NaN si liste vide."""
-        return (sum(lst) / len(lst)) if lst else float("nan")
+        if print_every > 0 and (k % print_every == 0):
+            print("  Parties terminées:", k, "/", n_games)
 
-    NOMBRE_PARTIES_EFFECTUE = 0
-    return {
+    nb_total = (2 * n_games) if symetriser else n_games
+    nb_valides = nb_total - nb_timeouts
+
+    if nb_valides <= 0:
+        winrate_a = float("nan")
+        winrate_b = float("nan")
+        bas, haut = 0.0, 1.0
+    else:
+        winrate_a = 100.0 * victoires_a / nb_valides
+        winrate_b = 100.0 * victoires_b / nb_valides
+        bas, haut = ic95_proportion(victoires_a, nb_valides)
+
+    res = {
+        "mode": "simple",
         "A": strat_a.nom,
         "B": strat_b.nom,
         "n_games": n_games,
-        "wins_A": wins_a,
-        "wins_B": wins_b,
-        "winrate_A_pct": 100.0 * wins_a / n_games,
-        "winrate_B_pct": 100.0 * wins_b / n_games,
-        "avg_rounds_overall": rounds_total / n_games,
-        "avg_rounds_when_A_wins": _avg(rounds_when_a_wins),
-        "avg_rounds_when_B_wins": _avg(rounds_when_b_wins),
+        "seed": seed,
+
+        "wins_A": victoires_a,
+        "wins_B": victoires_b,
+        "winrate_A_pct": winrate_a,
+        "winrate_B_pct": winrate_b,
+        "winrate_A_ci95_low_pct": 100.0 * bas,
+        "winrate_A_ci95_high_pct": 100.0 * haut,
+
+        "avg_rounds_overall": (manches_total / nb_total) if nb_total > 0 else float("nan"),
+        "avg_rounds_when_A_wins": (sum(manches_quand_a_gagne) / len(manches_quand_a_gagne)) if manches_quand_a_gagne else "",
+        "avg_rounds_when_B_wins": (sum(manches_quand_b_gagne) / len(manches_quand_b_gagne)) if manches_quand_b_gagne else "",
+        "n_timeouts": nb_timeouts,
     }
+
+    if export_csv:
+        ecrire_ligne_csv(res)
+
+    return res
+
+
+def comparer_deux_strategies_repetitions(
+    strat_a: Strategie,
+    strat_b: Strategie,
+    n_games: int,
+    seed: int,
+    n_repetitions: int,
+    print_every: int = 0,
+    export_csv: bool = True,
+    symetriser: bool = True,
+    max_manches: int = 5000,
+) -> Dict[str, object]:
+    """
+    Analyse robuste (répétitions) :
+    - On répète l'expérience plusieurs fois.
+    - Chaque répétition utilise une seed différente.
+    - On résume : moyenne / écart-type / min / max du winrate.
+    """
+    winrates: List[float] = []
+    moyennes_manches: List[float] = []
+    timeouts: List[int] = []
+
+    for rep in range(n_repetitions):
+        seed_locale = seed + 10000 * rep
+
+        if print_every > 0:
+            print("Répétition", rep + 1, "/", n_repetitions)
+
+        res_rep = comparer_deux_strategies(
+            strat_a, strat_b,
+            n_games=n_games,
+            seed=seed_locale,
+            print_every=print_every,
+            export_csv=False,
+            symetriser=symetriser,
+            max_manches=max_manches
+        )
+
+        try:
+            winrates.append(float(res_rep["winrate_A_pct"]))
+        except Exception:
+            pass
+
+        try:
+            moyennes_manches.append(float(res_rep["avg_rounds_overall"]))
+        except Exception:
+            pass
+
+        try:
+            timeouts.append(int(res_rep.get("n_timeouts", 0)))
+        except Exception:
+            pass
+
+    res = {
+        "mode": "repetitions",
+        "A": strat_a.nom,
+        "B": strat_b.nom,
+        "n_games": n_games,
+        "seed": seed,
+
+        "n_repetitions": n_repetitions,
+        "winrate_A_mean_pct": moyenne(winrates),
+        "winrate_A_std_pct": ecart_type(winrates),
+        "winrate_A_min_pct": min(winrates) if winrates else float("nan"),
+        "winrate_A_max_pct": max(winrates) if winrates else float("nan"),
+
+        "avg_rounds_overall_mean": moyenne(moyennes_manches),
+        "avg_rounds_overall_std": ecart_type(moyennes_manches),
+
+        "n_timeouts": sum(timeouts) if timeouts else 0,
+    }
+
+    if export_csv:
+        ecrire_ligne_csv(res)
+
+    return res
 
 
 # ============================================================
-# ======================= CONSOLE OUTPUT =======================
+# ======================= AFFICHAGE ===========================
 # ============================================================
 
 def print_result(res: Dict[str, object]) -> None:
+    mode = res.get("mode", "simple")
+
+    if mode == "simple":
+        A = res["A"]
+        B = res["B"]
+        n = res["n_games"]
+
+        print("=" * 72)
+        print(f"Match-up (simple):  A = {A}   vs   B = {B}   |   N = {n}")
+        print("-" * 72)
+
+        if isinstance(res.get("winrate_A_pct"), float):
+            print(
+                f"Winrate A: {res['winrate_A_pct']:.2f}%"
+                f"   |   IC95 (Wilson): [{res['winrate_A_ci95_low_pct']:.2f}% ; {res['winrate_A_ci95_high_pct']:.2f}%]"
+            )
+            print(f"Winrate B: {res['winrate_B_pct']:.2f}%")
+        else:
+            print("Winrate: non disponible (trop de timeouts)")
+
+        print("-" * 72)
+        print(f"Avg rounds overall:         {res['avg_rounds_overall']:.2f}")
+        if res.get("avg_rounds_when_A_wins") != "":
+            print(f"Avg rounds when A wins:     {res['avg_rounds_when_A_wins']:.2f}")
+        if res.get("avg_rounds_when_B_wins") != "":
+            print(f"Avg rounds when B wins:     {res['avg_rounds_when_B_wins']:.2f}")
+
+        print(f"Timeouts: {res.get('n_timeouts', 0)}")
+        print("=" * 72)
+        print()
+
+    else:
+        A = res["A"]
+        B = res["B"]
+        n = res["n_games"]
+        k = res["n_repetitions"]
+
+        print("=" * 72)
+        print(f"Match-up (répétitions):  A = {A}   vs   B = {B}   |   N = {n}   |   K = {k}")
+        print("-" * 72)
+        print(f"Winrate A (moyenne): {res['winrate_A_mean_pct']:.2f}%")
+        print(f"Winrate A (écart-type): {res['winrate_A_std_pct']:.2f}%")
+        print(f"Winrate A (min..max): [{res['winrate_A_min_pct']:.2f}% ; {res['winrate_A_max_pct']:.2f}%]")
+        print("-" * 72)
+        print(f"Avg rounds overall (moyenne): {res['avg_rounds_overall_mean']:.2f}")
+        print(f"Avg rounds overall (écart-type): {res['avg_rounds_overall_std']:.2f}")
+        print(f"Timeouts (total): {res.get('n_timeouts', 0)}")
+        print("=" * 72)
+        print()
+
+
+# ============================================================
+# ======================= COMPARAISON ADAPTATIVE ==============
+# ============================================================
+
+def comparer_toutes_strategies_adaptatif(
+    seed: int = 12345,
+    n_games_petit: int = 80,
+    n_games_gros: int = 250,
+    n_repetitions_gros: int = 5,
+    print_every_gros: int = 50,
+    export_csv: bool = True,
+) -> None:
     """
-    Affichage lisible d'un match-up.
-    """
-    A = res["A"]
-    B = res["B"]
-    n = res["n_games"]
+    Compare toutes les stratégies entre elles, effort adaptatif.
 
-    print("=" * 72)
-    print(f"Match-up:  A = {A}   vs   B = {B}   |   N = {n}")
-    print("-" * 72)
-
-    # 1) % victoires
-    print(f"Winrate A: {res['winrate_A_pct']:.1f}%   ({res['wins_A']}/{n})")
-    print(f"Winrate B: {res['winrate_B_pct']:.1f}%   ({res['wins_B']}/{n})")
-
-    print("-" * 72)
-
-    # 2) vitesse (manches)
-    print(f"Avg rounds overall:         {res['avg_rounds_overall']:.2f}")
-    print(f"Avg rounds when A wins:     {res['avg_rounds_when_A_wins']:.2f}")
-    print(f"Avg rounds when B wins:     {res['avg_rounds_when_B_wins']:.2f}")
-
-    print("=" * 72)
-    print()
-
-def logs_result(res) -> None:
-    
-    filename = "data/results.txt"
-    file = open(filename,'a+')
-
-    A = res["A"]
-    B = res["B"]
-    n = res["n_games"]
-
-    file.write("=" * 72+' \n ')
-    file.write(f"Match-up:  A = {A}   vs   B = {B}   |   N = {n} \n ")
-    file.write("-" * 72 + ' \n ')
-
-    # 1) % victoires
-    file.write(f"Winrate A: {res['winrate_A_pct']:.1f}%   ({res['wins_A']}/{n}) \n ")
-    file.write(f"Winrate B: {res['winrate_B_pct']:.1f}%   ({res['wins_B']}/{n}) \n ")
-
-    file.write("-" * 72 + ' \n ')
-
-    # 2) vitesse (manches)
-    file.write(f"Avg rounds overall:         {res['avg_rounds_overall']:.2f} \n ")
-    file.write(f"Avg rounds when A wins:     {res['avg_rounds_when_A_wins']:.2f}  \n ")
-    file.write(f"Avg rounds when B wins:     {res['avg_rounds_when_B_wins']:.2f}  \n ")
-
-    file.write("=" * 72)
-    file.write(' \n ')
-    file.close()
-
-def comparer_toutes_strategies(n_games: int = 1000, seed: int = 12345) -> None:
-    """
-    Compare toutes les stratégies entre elles :
-    - pour chaque paire (i < j), on fait A vs B et on affiche le résultat.
+    Note : on utilise la comparaison symétrisée par défaut
+    pour éviter les biais liés à l'ordre A/B.
     """
     for i in range(len(STRATEGIES)):
         for j in range(i + 1, len(STRATEGIES)):
-            a = STRATEGIES[i]
-            b = STRATEGIES[j]
+            strat1 = STRATEGIES[i]
+            strat2 = STRATEGIES[j]
 
-            # On modifie légèrement le seed selon la paire pour éviter
-            # d'avoir des suites trop similaires entre les comparaisons.
-            local_seed = seed + 1000 * i + j
+            seed_locale = seed + 1000 * i + j
 
-            res = comparer_deux_strategies(a, b, n_games=n_games, seed=local_seed)
-            print_result(res)
-            logs_result(res)
+            strat1_grosse = est_grosse_strategie(strat1)
+            strat2_grosse = est_grosse_strategie(strat2)
+
+            if strat1_grosse and strat2_grosse:
+                print(">>> GROS vs GROS :", strat1.nom, "vs", strat2.nom)
+                res = comparer_deux_strategies_repetitions(
+                    strat1, strat2,
+                    n_games=n_games_gros,
+                    seed=seed_locale,
+                    n_repetitions=n_repetitions_gros,
+                    print_every=print_every_gros,
+                    export_csv=export_csv,
+                    symetriser=True
+                )
+                print_result(res)
+            else:
+                res = comparer_deux_strategies(
+                    strat1, strat2,
+                    n_games=n_games_petit,
+                    seed=seed_locale,
+                    print_every=0,
+                    export_csv=export_csv,
+                    symetriser=True
+                )
+                print_result(res)
 
 
 def run_stats() -> None:
     """
-    Point d'entrée appelé par : python main.py stats
+    Point d'entrée : python main.py stats
     """
     print("=== MODE STATS (sans pygame) ===")
     print("Stratégies disponibles:")
     for s in STRATEGIES:
-        print(" -", s.nom)
+        tag = ""
+        if est_grosse_strategie(s):
+            tag = " (GROSSE)"
+        elif est_petite_strategie(s):
+            tag = " (petite)"
+        print(" -", s.nom + tag)
     print()
 
-    # Paramètres principaux :
-    N = 100     # nombre de parties par match-up
-    SEED = 12345 # seed de base pour la reproductibilité
+    SEED = 12345
 
-    comparer_toutes_strategies(n_games=N, seed=SEED)
+    comparer_toutes_strategies_adaptatif(
+        seed=SEED,
+        n_games_petit=500,
+        n_games_gros=400,
+        n_repetitions_gros=6,
+        print_every_gros=50,
+        export_csv=True
+    )
 
 
 if __name__ == "__main__":
     run_stats()
-
-
-
