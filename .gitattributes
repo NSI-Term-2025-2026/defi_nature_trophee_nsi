@@ -1,2 +1,3 @@
 docs/** linguist-documentation=false
 sources/** linguist-documentation=false
+tests/** linguist-documentation=false
