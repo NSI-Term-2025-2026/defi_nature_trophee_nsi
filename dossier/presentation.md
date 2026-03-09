@@ -36,8 +36,8 @@ Notre équipe est composée de trois élèves : Antonin, Alexi et Léo. Nous avo
   - mise en place des boutons, menus, zones visuelles et réglages ergonomiques ;
   - intégration des effets sonores.
 - **Léo (intégration, données, tests, documentation)**
-  - analyse des règles du jeu et préparation des cartes ;
-  - gestion des ressources graphiques ;
+  - analyse des règles du jeu et préparation des cartes, gestion des ressources graphiques ;
+  - mise en place de la modularité entre `main.py`, `cerveau.py`, `game_pygame.py`, `stats.py`  ;
   - bêta-tests, retours qualité et contribution à la documentation.
 
 ### Temps passé sur le projet
