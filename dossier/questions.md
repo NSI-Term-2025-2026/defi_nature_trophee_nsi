@@ -1,5 +1,5 @@
 # Questions 
-
+ 
 ## 1. Le projet est-il une création originale ?
 Le projet est entièrement original. Cependant, nous avons utilisé des extraits de la documentation de Pygame pour certaines parties, notamment pour l’implémentation de fonctionnalités comme les sons ou le menu déroulant à gauche. Ces extraits ont été adaptés pour correspondre aux besoins du projet.
 
